@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt, {
-  AssembleContext, PromptAssembly, renderContextSections, renderContextSnapshot, renderPrompt,
+  AssembleContext, PromptAssembly, STAN_IDENTITY_TEXT, renderContextSections, renderContextSnapshot, renderPrompt,
 } from '@deepseek-ai/dsh-system-prompt'
 import type { PromptContextOrderName, PromptSectionOrderName } from '@deepseek-ai/dsh-system-prompt'
 
@@ -12,7 +12,8 @@ import type { PromptContextOrderName, PromptSectionOrderName } from '@deepseek-a
  * their own sections; the built-ins' behavior is pinned by its own describe.
  */
 const BUILT_IN = ['harness:identity', 'deployment:persona-prefix', 'deployment:persona-suffix']
-const IDENTITY = 'You are an AI agent powered by DeepSeek Harness.'
+// [dsh-stan] Fork identity opener (upstream: 'You are an AI agent powered by DeepSeek Harness.').
+const IDENTITY = "You are Stan — the operator's own agent." + "\n\n" + STAN_IDENTITY_TEXT.split("\n\n").slice(1).join("\n\n")
 const SECTION_ORDER_NAMES = [
   'HARNESS_IDENTITY', 'DEPLOYMENT_PERSONA_PREFIX',
   'PLAN_POLICY', 'TEAM_POLICY', 'PTC_ONLY', 'FILE_REFERENCE', 'TOOL_BASH',

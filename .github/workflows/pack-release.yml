@@ -1,0 +1,145 @@
+# Build the cross-platform native binaries and pack the release set.
+#
+# Why this runs in CI rather than on a dev box: release:pack refuses a platform
+# package whose declared binary is missing or built for the wrong architecture
+# (native/system/scripts/verify-launcher-binary.mjs). darwin-arm64 needs a
+# Mach-O from Apple silicon, linux-arm64 needs an ARM runner - no single host
+# can produce a complete publish set.
+#
+# Why the binaries are not committed: native/system/.gitignore excludes
+# packages/*/bin/ on purpose. Binaries ride npm tarballs via each package's
+# `files` list, never git. So this workflow builds on all four runners, uploads
+# the binaries as an artifact for the pack job to consume in the same run, and
+# leaves the release tarballs as the deliverable.
+name: Pack release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: Matrix
+    runs-on: ubuntu-24.04
+    outputs:
+      prebuilds: ${{ steps.matrix.outputs.prebuilds }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        run: echo "prebuilds=$(node ./scripts/github-matrix.mjs release-prebuild)" >> "$GITHUB_OUTPUT"
+        working-directory: native/system
+
+  # Build each platform's binaries on its own architecture.
+  build:
+    name: ${{ matrix.package }}
+    needs: matrix
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix.outputs.prebuilds) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --filter @deepseek-ai/node-addon-system-workspace... --frozen-lockfile
+
+      - name: Install musl toolchain
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq musl-tools
+
+      - name: Build native binaries
+        run: pnpm build:native
+        working-directory: native/system
+
+      - name: Verify binary metadata
+        run: node ./scripts/verify-launcher-binary.mjs ${{ matrix.dir }}
+        working-directory: native/system
+
+      - name: Upload prebuild artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: native/system/${{ matrix.dir }}/bin/**
+          if-no-files-found: error
+          retention-days: 7
+
+  # Build everything else and pack the full family. Runs on Linux so the
+  # host-side artifacts match what the majority of users install.
+  pack:
+    name: Pack
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq musl-tools
+
+      - name: Collect prebuilds into their packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: prebuild-*
+          path: native/system/prebuilds-staging
+
+      - name: Place binaries
+        run: |
+          set -euo pipefail
+          cd native/system
+          for dir in prebuilds-staging/*; do
+            pkg="$(basename "$dir")"
+            pkg="${pkg#prebuild-}"
+            mkdir -p "packages/$pkg/bin"
+            cp -R "$dir"/. "packages/$pkg/bin/"
+          done
+          rm -rf prebuilds-staging
+          find packages -name 'system.node' -o -name 'landlock-run' | sort
+
+      - name: Build host and client artifacts
+        run: pnpm run build:official
+
+      - name: Pack the release family
+        run: |
+          mkdir -p dist/npm
+          pnpm exec tsx scripts/release/pack.ts --family dsh --out dist/npm
+
+      - name: Inventory
+        run: |
+          ls -la dist/npm | head -20
+          echo "tarball count: $(ls dist/npm/*.tgz 2>/dev/null | wc -l)"
+
+      - name: Upload release tarballs
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-release-tarballs
+          path: dist/npm/**
+          if-no-files-found: error
+          retention-days: 30
