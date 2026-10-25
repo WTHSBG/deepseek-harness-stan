@@ -129,7 +129,7 @@ jobs:
       - name: Pack the release family
         run: |
           mkdir -p dist/npm
-          pnpm run release:pack
+          pnpm exec tsx scripts/release/pack.ts --family dsh --out dist/npm
 
       - name: Inventory
         run: |
