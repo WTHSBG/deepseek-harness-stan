@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import SystemPrompt, { STAN_IDENTITY_TEXT, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { createScope, type ScopeKey } from '@deepseek-ai/dsh-scope'
 import { describe, expect, it } from 'vitest'
 import * as Persona from '@deepseek-ai/dsh-persona'
@@ -17,6 +17,9 @@ async function personaText(ctx: Context, scope?: ScopeKey): Promise<string | und
   return assembly.sections.find(section => section.name === PERSONA_PREFIX_SECTION)?.text
 }
 
+// [dsh-stan] Fork identity section: opener plus the operator body.
+const IDENTITY = STAN_IDENTITY_TEXT
+
 describe('the persona row', () => {
   it('shadows and interpolates the environment per scope, restoring both defaults on disposal', async () => {
     const ctx = new Context()
@@ -29,7 +32,7 @@ describe('the persona row', () => {
       const fiber = await scope.ctx.plugin(Persona, { prefix: 'Preset.', suffix: 'Workspace {{cwd}}.' })
       const assembly = await ctx.systemPrompt.assemble({ scope: key })
       expect(assembly.sections.find(section => section.name === PERSONA_SUFFIX_SECTION)?.text).toBe('Workspace {{cwd}}.')
-      expect(renderPrompt(assembly)).toBe('You are an AI agent powered by DeepSeek Harness.\n\nPreset.\n\nUse tools.\n\nWorkspace /local.')
+      expect(renderPrompt(assembly)).toBe(`${IDENTITY}\n\nPreset.\n\nUse tools.\n\nWorkspace /local.`)
       expect(renderPrompt(await ctx.systemPrompt.assemble())).toContain('Global workspace.')
       await fiber.dispose()
       const restored = renderPrompt(await ctx.systemPrompt.assemble({ scope: key }))
